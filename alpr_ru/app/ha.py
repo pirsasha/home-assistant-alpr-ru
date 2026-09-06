@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -12,32 +13,64 @@ import websockets
 
 HA_API = "http://supervisor/core/api"
 HA_WS = "ws://supervisor/core/websocket"
+_TOKEN_FILES = (
+    Path("/run/s6/container_environment/SUPERVISOR_TOKEN"),
+    Path("/run/s6/container_environment/HASSIO_TOKEN"),
+)
 
 
 class HomeAssistantError(RuntimeError):
     pass
 
 
+def _supervisor_token() -> str:
+    for name in ("SUPERVISOR_TOKEN", "HASSIO_TOKEN"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    for path in _TOKEN_FILES:
+        try:
+            value = path.read_text(encoding="utf-8").strip().strip("\x00")
+        except OSError:
+            continue
+        if value:
+            return value
+    return ""
+
+
 class HomeAssistantClient:
-    def __init__(self) -> None:
-        self.token = os.environ.get("SUPERVISOR_TOKEN", "")
+    @property
+    def token(self) -> str:
+        return _supervisor_token()
 
     @property
     def headers(self) -> dict[str, str]:
-        if not self.token:
-            raise HomeAssistantError("SUPERVISOR_TOKEN недоступен")
-        return {"Authorization": f"Bearer {self.token}"}
+        token = self.token
+        if not token:
+            raise HomeAssistantError(
+                "SUPERVISOR_TOKEN недоступен. Проверьте homeassistant_api в конфигурации App и перезапустите ALPR-RU."
+            )
+        return {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
 
     async def states(self) -> list[dict[str, Any]]:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
             response = await client.get(f"{HA_API}/states", headers=self.headers)
+            if response.status_code in (401, 403):
+                raise HomeAssistantError(
+                    f"Home Assistant отклонил Supervisor token (HTTP {response.status_code})"
+                )
             response.raise_for_status()
             data = response.json()
         return data if isinstance(data, list) else []
 
     async def entities(self) -> dict[str, list[dict[str, str]]]:
         groups: dict[str, list[dict[str, str]]] = {
-            "cameras": [], "triggers": [], "gates": []
+            "cameras": [],
+            "triggers": [],
+            "gates": [],
         }
         for state in await self.states():
             entity_id = str(state.get("entity_id") or "")
@@ -58,10 +91,14 @@ class HomeAssistantClient:
         if not entity_id.startswith("camera."):
             raise HomeAssistantError("Выбрана некорректная camera.* сущность")
         safe_entity = quote(entity_id, safe="._-")
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
             response = await client.get(
                 f"{HA_API}/camera_proxy/{safe_entity}", headers=self.headers
             )
+            if response.status_code in (401, 403):
+                raise HomeAssistantError(
+                    f"Home Assistant отклонил Supervisor token (HTTP {response.status_code})"
+                )
             response.raise_for_status()
             content_type = response.headers.get("content-type", "image/jpeg").split(";", 1)[0]
             if not response.content:
@@ -79,12 +116,16 @@ class HomeAssistantClient:
         }.get(domain)
         if not service:
             raise HomeAssistantError("Поддерживаются только cover.*, switch.* и button.*")
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
             response = await client.post(
                 f"{HA_API}/services/{domain}/{service}",
-                headers={**self.headers, "Content-Type": "application/json"},
+                headers=self.headers,
                 json={"entity_id": entity_id},
             )
+            if response.status_code in (401, 403):
+                raise HomeAssistantError(
+                    f"Home Assistant отклонил Supervisor token (HTTP {response.status_code})"
+                )
             response.raise_for_status()
         return f"{domain}.{service}"
 
@@ -93,20 +134,40 @@ class HomeAssistantClient:
         callback: Callable[[dict[str, Any]], Awaitable[None]],
         stop_event: asyncio.Event,
     ) -> None:
-        if not self.token:
-            return
         retry = 2
         while not stop_event.is_set():
+            token = self.token
+            if not token:
+                await asyncio.sleep(retry)
+                retry = min(retry * 2, 30)
+                continue
             try:
-                async with websockets.connect(HA_WS, open_timeout=15, ping_interval=30) as websocket:
+                async with websockets.connect(
+                    HA_WS,
+                    open_timeout=15,
+                    ping_interval=30,
+                    proxy=None,
+                ) as websocket:
                     hello = json.loads(await websocket.recv())
                     if hello.get("type") != "auth_required":
                         raise HomeAssistantError("Неожиданный ответ Home Assistant WebSocket")
-                    await websocket.send(json.dumps({"type": "auth", "access_token": self.token}))
+                    await websocket.send(
+                        json.dumps({"type": "auth", "access_token": token})
+                    )
                     auth = json.loads(await websocket.recv())
                     if auth.get("type") != "auth_ok":
-                        raise HomeAssistantError("Home Assistant WebSocket: авторизация отклонена")
-                    await websocket.send(json.dumps({"id": 1, "type": "subscribe_events", "event_type": "state_changed"}))
+                        raise HomeAssistantError(
+                            "Home Assistant WebSocket: авторизация отклонена"
+                        )
+                    await websocket.send(
+                        json.dumps(
+                            {
+                                "id": 1,
+                                "type": "subscribe_events",
+                                "event_type": "state_changed",
+                            }
+                        )
+                    )
                     subscribed = json.loads(await websocket.recv())
                     if not subscribed.get("success"):
                         raise HomeAssistantError("Не удалось подписаться на state_changed")
