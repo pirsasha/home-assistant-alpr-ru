@@ -10,6 +10,26 @@ class AlprError(RuntimeError):
     pass
 
 
+def validate_api_key(value: str) -> str:
+    """Validate that the API key is safe to send as an HTTP header."""
+    api_key = str(value or "").strip()
+    if not api_key:
+        raise AlprError("Не задан API key ALPR-RU")
+    try:
+        api_key.encode("ascii")
+    except UnicodeEncodeError as error:
+        raise AlprError(
+            "API key содержит кириллицу или другие недопустимые символы. "
+            "Скопируйте ключ заново без изменений."
+        ) from error
+    if any(ord(char) < 33 or ord(char) > 126 for char in api_key):
+        raise AlprError(
+            "API key содержит пробелы или управляющие символы. "
+            "Скопируйте ключ заново без изменений."
+        )
+    return api_key
+
+
 async def recognize(
     *,
     api_url: str,
@@ -18,8 +38,7 @@ async def recognize(
     content_type: str,
     plate_type: str = "auto",
 ) -> dict[str, Any]:
-    if not api_key:
-        raise AlprError("Не задан API key ALPR-RU")
+    api_key = validate_api_key(api_key)
     base = api_url.rstrip("/") + "/"
     url = urljoin(base, "v1/recognize")
     files = {"file": ("home_assistant_camera.jpg", image, content_type or "image/jpeg")}
@@ -29,8 +48,17 @@ async def recognize(
         "include_debug_urls": "true",
     }
     try:
-        async with httpx.AsyncClient(timeout=45, follow_redirects=True) as client:
-            response = await client.post(url, headers={"X-API-Key": api_key}, files=files, data=data)
+        async with httpx.AsyncClient(
+            timeout=45,
+            follow_redirects=True,
+            trust_env=False,
+        ) as client:
+            response = await client.post(
+                url,
+                headers={"X-API-Key": api_key},
+                files=files,
+                data=data,
+            )
     except httpx.HTTPError as error:
         raise AlprError(str(error)) from error
     try:
@@ -53,7 +81,11 @@ async def download_result_image(api_url: str, result: dict[str, Any]) -> tuple[b
     if url.startswith("/"):
         url = api_url.rstrip("/") + url
     try:
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            timeout=20,
+            follow_redirects=True,
+            trust_env=False,
+        ) as client:
             response = await client.get(url)
             response.raise_for_status()
             if not response.content:
