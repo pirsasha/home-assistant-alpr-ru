@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ALPR-RU</title>
+  <link rel="stylesheet" href="static/app.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>ALPR-RU</h1>
+      <p>Распознавание номеров и доступ по автомобилю</p>
+    </div>
+    <span id="version" class="pill">...</span>
+  </header>
+
+  <nav>
+    <button data-tab="overview" class="active">Обзор</button>
+    <button data-tab="vehicles">Автомобили</button>
+    <button data-tab="history">История</button>
+    <button data-tab="settings">Настройки</button>
+  </nav>
+
+  <main>
+    <section id="tab-overview" class="tab active">
+      <div class="grid two">
+        <article class="card">
+          <div class="card-title">Последний отправленный кадр</div>
+          <div class="image-box"><img id="sent-image" alt="Последний отправленный кадр"></div>
+        </article>
+        <article class="card">
+          <div class="card-title">Последний результат ALPR</div>
+          <div class="image-box crop"><img id="result-image" alt="Последний crop номера"></div>
+        </article>
+      </div>
+      <article class="card result-card">
+        <div>
+          <div class="muted">Последний номер</div>
+          <div id="last-plate" class="plate">—</div>
+          <div id="last-meta" class="muted">Распознаваний ещё не было</div>
+        </div>
+        <div id="access-badge" class="access neutral">Нет данных</div>
+        <button id="recognize-btn" class="primary">Распознать сейчас</button>
+      </article>
+    </section>
+
+    <section id="tab-vehicles" class="tab">
+      <article class="card">
+        <div class="row between"><div class="card-title">Разрешённые автомобили</div><button id="add-vehicle" class="primary small">+ Добавить</button></div>
+        <div id="vehicles-list" class="list"></div>
+      </article>
+    </section>
+
+    <section id="tab-history" class="tab">
+      <article class="card">
+        <div class="card-title">История распознаваний</div>
+        <div id="events-list" class="list"></div>
+      </article>
+    </section>
+
+    <section id="tab-settings" class="tab">
+      <form id="settings-form" class="card form-grid">
+        <label>ALPR API URL<input id="api-url" type="url" value="https://api-alpr.pirogovx.ru"></label>
+        <label>API key<input id="api-key" type="password" placeholder="Оставьте пустым, чтобы не менять сохранённый ключ"></label>
+        <label>Камера<select id="camera-entity"><option value="">Не выбрана</option></select></label>
+        <label>Триггер распознавания<select id="trigger-entity"><option value="">Без автоматического триггера</option></select></label>
+        <label>Тип номера<select id="plate-type"><option value="auto">Автоматически</option><option value="single_line">Однострочный</option><option value="two_line">Двухстрочный</option></select></label>
+        <label>Устройство ворот<select id="gate-entity"><option value="">Не открывать автоматически</option></select></label>
+        <label>Минимальная уверенность<input id="min-confidence" type="number" min="0" max="1" step="0.01"></label>
+        <label>Cooldown ворот, сек<input id="gate-cooldown" type="number" min="0" max="3600"></label>
+        <div class="row"><button type="submit" class="primary">Сохранить</button><span id="settings-state" class="muted"></span></div>
+      </form>
+    </section>
+  </main>
+
+  <dialog id="vehicle-dialog">
+    <form id="vehicle-form" method="dialog" class="dialog-form">
+      <h2>Автомобиль</h2>
+      <label>Госномер<input id="vehicle-plate" required placeholder="A123BC161"></label>
+      <label>Имя / клиент<input id="vehicle-name" placeholder="Александр"></label>
+      <label>Комментарий<input id="vehicle-note"></label>
+      <label class="check"><input id="vehicle-enabled" type="checkbox" checked> Активен</label>
+      <label class="check"><input id="vehicle-open-gate" type="checkbox" checked> Открывать ворота</label>
+      <div class="row end"><button type="button" id="vehicle-cancel">Отмена</button><button type="submit" class="primary">Сохранить</button></div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast"></div>
+  <script src="static/app.js"></script>
+</body>
+</html>
