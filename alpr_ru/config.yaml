@@ -1,5 +1,5 @@
 name: ALPR-RU
-version: "0.1.0"
+version: "0.1.1"
 slug: alpr_ru
 description: Распознавание автомобильных номеров и открытие ворот через Home Assistant
 url: https://github.com/pirsasha/home-assistant-alpr-ru
@@ -15,5 +15,7 @@ ingress_port: 8099
 panel_icon: mdi:license
 panel_title: ALPR-RU
 homeassistant_api: true
+hassio_api: true
+hassio_role: default
 map:
   - addon_config:rw
