@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .alpr import download_result_image, recognize
+from .alpr import AlprError, download_result_image, recognize, validate_api_key
 from .config import APP_VERSION, DATA_DIR, LAST_RESULT_PATH, LAST_SENT_PATH, load_settings, save_settings
 from .db import add_event, allowed_vehicle, delete_vehicle, init_db, list_events, list_vehicles, normalize_plate, upsert_vehicle
 from .ha import HomeAssistantClient
@@ -214,7 +214,12 @@ async def ha_entities() -> dict[str, list[dict[str, str]]]:
 def update_settings(payload: SettingsInput) -> dict[str, Any]:
     current = load_settings()
     incoming = payload.model_dump()
-    if not incoming.get("api_key"):
+    if incoming.get("api_key"):
+        try:
+            incoming["api_key"] = validate_api_key(str(incoming["api_key"]))
+        except AlprError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+    else:
         incoming["api_key"] = current.get("api_key", "")
     if incoming.get("plate_type") not in {"auto", "single_line", "two_line"}:
         raise HTTPException(status_code=422, detail="Некорректный тип номера")
