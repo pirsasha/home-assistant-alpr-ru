@@ -20,6 +20,23 @@ function toast(text) {
   setTimeout(() => el.classList.remove("show"), 3000);
 }
 
+function formatMoscow(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  const parts = new Intl.DateTimeFormat('ru-RU', {
+    timeZone: 'Europe/Moscow',
+    hour: '2-digit',
+    minute: '2-digit',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const get = (type) => parts.find((part) => part.type === type)?.value || '';
+  return `${get('hour')}:${get('minute')} ${get('day')}.${get('month')}.${get('year')}`;
+}
+
 function tab(name) {
   $$('nav button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
   $$('.tab').forEach((s) => s.classList.toggle('active', s.id === `tab-${name}`));
@@ -47,7 +64,7 @@ async function loadStatus() {
   const r = statusData.last_result || {};
   $('#last-plate').textContent = r.plate || '—';
   const conf = r.confidence == null ? '' : ` · ${(Number(r.confidence) * 100).toFixed(1)}%`;
-  $('#last-meta').textContent = r.error ? `Ошибка: ${r.error}` : (r.occurred_at || 'Распознаваний ещё не было') + conf;
+  $('#last-meta').textContent = r.error ? `Ошибка: ${r.error}` : (r.occurred_at ? formatMoscow(r.occurred_at) : 'Распознаваний ещё не было') + conf;
   const badge = $('#access-badge');
   badge.className = 'access ' + (r.allowed ? 'good' : (r.plate ? 'bad' : 'neutral'));
   badge.textContent = r.allowed ? (r.gate_opened ? 'Доступ разрешён · ворота открыты' : 'Доступ разрешён') : (r.plate ? 'Доступ запрещён' : 'Нет данных');
@@ -129,7 +146,7 @@ function renderDahuaStatus() {
   }
   if (d.connected) {
     let text = `Dahua VideoMotion: подключено к ${d.camera_url || 'камере'}`;
-    if (d.last_event_at) text += ` · последнее событие ${d.last_action || ''} ${d.last_event_at}`;
+    if (d.last_event_at) text += ` · последнее событие ${d.last_action || ''} ${formatMoscow(d.last_event_at)}`;
     el.textContent = text;
   } else {
     el.textContent = `Dahua VideoMotion: ${d.last_error || 'подключение...'}`;
@@ -221,7 +238,7 @@ async function loadEvents() {
   for (const r of rows) {
     const d = document.createElement('div');
     d.className = 'list-item';
-    d.innerHTML = `<div><div class="list-title">${esc(r.plate || 'Номер не найден')}</div><div class="list-meta">${esc(r.occurred_at)}${r.confidence != null ? ' · ' + (Number(r.confidence) * 100).toFixed(1) + '%' : ''} · ${r.error ? 'Ошибка: ' + esc(r.error) : (r.allowed ? (r.gate_opened ? 'Разрешён · ворота открыты' : 'Разрешён') : 'Отказ')}</div></div>`;
+    d.innerHTML = `<div><div class="list-title">${esc(r.plate || 'Номер не найден')}</div><div class="list-meta">${esc(formatMoscow(r.occurred_at))}${r.confidence != null ? ' · ' + (Number(r.confidence) * 100).toFixed(1) + '%' : ''} · ${r.error ? 'Ошибка: ' + esc(r.error) : (r.allowed ? (r.gate_opened ? 'Разрешён · ворота открыты' : 'Разрешён') : 'Отказ')}</div></div>`;
     box.appendChild(d);
   }
 }
