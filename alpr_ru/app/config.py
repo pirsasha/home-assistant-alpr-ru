@@ -37,6 +37,8 @@ def load_settings() -> dict[str, Any]:
             saved = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
             if isinstance(saved, dict):
                 values.update(saved)
+                if "trigger_mode" not in saved and saved.get("trigger_entity"):
+                    values["trigger_mode"] = "ha"
         except (OSError, json.JSONDecodeError):
             pass
     return values
