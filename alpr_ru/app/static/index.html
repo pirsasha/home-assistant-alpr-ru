@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>ALPR-RU</title>
-  <link rel="stylesheet" href="static/app.css?v=0.1.7">
+  <link rel="stylesheet" href="static/app.css?v=0.1.8">
 </head>
 <body>
   <header>
@@ -54,8 +54,23 @@
 
     <section id="tab-history" class="tab">
       <article class="card">
-        <div class="card-title">История распознаваний</div>
-        <div id="events-list" class="list"></div>
+        <div class="row between history-heading">
+          <div>
+            <div class="card-title">История проездов</div>
+            <div class="muted">Локально хранятся только 10 последних событий вместе с кадром и crop номера.</div>
+          </div>
+          <span id="history-count" class="pill">0</span>
+        </div>
+
+        <form id="history-filters" class="history-filters">
+          <label>Дата<input id="history-date" type="date"></label>
+          <label>Номер<input id="history-plate" placeholder="Т878ЕО761" autocomplete="off"></label>
+          <label class="history-search-field">Поиск<input id="history-search" placeholder="Номер, имя, камера, ошибка" autocomplete="off"></label>
+          <label class="check history-switch"><input id="history-with-plate" type="checkbox"> Только с номером</label>
+          <button id="history-reset" type="button">Сбросить</button>
+        </form>
+
+        <div id="events-list" class="history-list"></div>
       </article>
     </section>
 
@@ -102,6 +117,6 @@
   </dialog>
 
   <div id="toast" class="toast"></div>
-  <script src="static/app.js?v=0.1.7"></script>
+  <script src="static/app.js?v=0.1.8"></script>
 </body>
 </html>
