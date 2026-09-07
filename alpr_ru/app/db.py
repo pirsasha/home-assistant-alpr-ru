@@ -62,7 +62,11 @@ def normalize_plate(value: str) -> str:
         "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H",
         "О": "O", "Р": "P", "С": "C", "Т": "T", "У": "Y", "Х": "X",
     })
-    return "".join(ch for ch in value.upper().replace("Ё", "Е").translate(translit) if ch.isalnum())
+    return "".join(
+        ch
+        for ch in value.upper().replace("Ё", "Е").translate(translit)
+        if ch.isalnum()
+    )
 
 
 def list_vehicles() -> list[dict[str, Any]]:
@@ -77,7 +81,9 @@ def upsert_vehicle(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Госномер обязателен")
     now = utc_now()
     with db() as connection:
-        existing = connection.execute("SELECT * FROM vehicles WHERE plate = ?", (plate,)).fetchone()
+        existing = connection.execute(
+            "SELECT * FROM vehicles WHERE plate = ?", (plate,)
+        ).fetchone()
         if existing:
             connection.execute(
                 """UPDATE vehicles
@@ -107,7 +113,9 @@ def upsert_vehicle(payload: dict[str, Any]) -> dict[str, Any]:
                     now,
                 ),
             )
-        row = connection.execute("SELECT * FROM vehicles WHERE plate = ?", (plate,)).fetchone()
+        row = connection.execute(
+            "SELECT * FROM vehicles WHERE plate = ?", (plate,)
+        ).fetchone()
     return dict(row)
 
 
@@ -140,7 +148,9 @@ def add_event(payload: dict[str, Any]) -> int:
                 str(payload.get("plate") or ""),
                 payload.get("confidence"),
                 payload.get("detector_confidence"),
-                None if payload.get("valid_format") is None else int(bool(payload.get("valid_format"))),
+                None
+                if payload.get("valid_format") is None
+                else int(bool(payload.get("valid_format"))),
                 int(bool(payload.get("allowed"))),
                 int(bool(payload.get("gate_opened"))),
                 str(payload.get("error") or ""),
@@ -149,10 +159,36 @@ def add_event(payload: dict[str, Any]) -> int:
         return int(cursor.lastrowid)
 
 
-def list_events(limit: int = 50) -> list[dict[str, Any]]:
-    limit = max(1, min(500, int(limit)))
+def prune_events(limit: int = 10) -> list[int]:
+    """Keep only the newest events and return deleted event ids."""
+    keep = max(1, int(limit))
     with db() as connection:
         rows = connection.execute(
-            "SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,)
+            "SELECT id FROM events ORDER BY id DESC LIMIT -1 OFFSET ?", (keep,)
+        ).fetchall()
+        deleted_ids = [int(row["id"]) for row in rows]
+        if deleted_ids:
+            placeholders = ",".join("?" for _ in deleted_ids)
+            connection.execute(
+                f"DELETE FROM events WHERE id IN ({placeholders})", deleted_ids
+            )
+    return deleted_ids
+
+
+def list_events(limit: int = 10) -> list[dict[str, Any]]:
+    limit = max(1, min(100, int(limit)))
+    with db() as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                e.*,
+                COALESCE(v.name, '') AS vehicle_name,
+                COALESCE(v.note, '') AS vehicle_note
+            FROM events AS e
+            LEFT JOIN vehicles AS v ON v.plate = e.plate
+            ORDER BY e.id DESC
+            LIMIT ?
+            """,
+            (limit,),
         ).fetchall()
     return [dict(row) for row in rows]
