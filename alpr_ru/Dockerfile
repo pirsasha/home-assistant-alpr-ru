@@ -16,6 +16,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+RUN python -m compileall -q app
+
 COPY run.sh /run.sh
 RUN sed -i 's/\r$//' /run.sh && chmod a+x /run.sh
 
