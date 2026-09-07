@@ -1,5 +1,5 @@
 name: ALPR-RU
-version: "0.1.6"
+version: "0.1.7"
 slug: alpr_ru
 description: Распознавание автомобильных номеров и открытие ворот через Home Assistant
 url: https://github.com/pirsasha/home-assistant-alpr-ru
