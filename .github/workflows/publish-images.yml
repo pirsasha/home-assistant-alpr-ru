@@ -5,8 +5,7 @@ on:
     branches:
       - main
     paths:
-      - "alpr_ru/**"
-      - ".github/workflows/publish-images.yml"
+      - "alpr_ru/config.yaml"
   workflow_dispatch:
 
 permissions:
