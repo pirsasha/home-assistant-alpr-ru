@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from time import monotonic
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
@@ -23,6 +25,8 @@ from .alpr import (
 from .config import (
     APP_VERSION,
     DATA_DIR,
+    HISTORY_DIR,
+    HISTORY_LIMIT,
     LAST_RESULT_PATH,
     LAST_SENT_PATH,
     load_settings,
@@ -37,12 +41,14 @@ from .db import (
     list_events,
     list_vehicles,
     normalize_plate,
+    prune_events,
     upsert_vehicle,
 )
 from .ha import HomeAssistantClient
 
 LOGGER = logging.getLogger("alpr_ru")
 APP_DIR = Path(__file__).resolve().parent
+MOSCOW = ZoneInfo("Europe/Moscow")
 HA = HomeAssistantClient()
 DAHUA = DahuaMotionListener()
 recognition_lock = asyncio.Lock()
@@ -87,6 +93,69 @@ def public_settings(settings: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _event_media_dir(event_id: int) -> Path:
+    return HISTORY_DIR / str(int(event_id))
+
+
+def _remove_event_media(event_ids: list[int]) -> None:
+    for event_id in event_ids:
+        shutil.rmtree(_event_media_dir(event_id), ignore_errors=True)
+
+
+def _prune_history_storage() -> None:
+    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    deleted_ids = prune_events(HISTORY_LIMIT)
+    _remove_event_media(deleted_ids)
+
+    keep_ids = {int(row["id"]) for row in list_events(HISTORY_LIMIT)}
+    for child in HISTORY_DIR.iterdir():
+        if child.is_dir() and child.name.isdigit() and int(child.name) not in keep_ids:
+            shutil.rmtree(child, ignore_errors=True)
+
+
+def _record_event(
+    event: dict[str, Any],
+    image: bytes | None = None,
+    crop: tuple[bytes, str] | None = None,
+) -> int:
+    event_id = add_event(event)
+    event_dir = _event_media_dir(event_id)
+    event_dir.mkdir(parents=True, exist_ok=True)
+    if image:
+        (event_dir / "frame.jpg").write_bytes(image)
+    if crop and crop[0]:
+        (event_dir / "crop.jpg").write_bytes(crop[0])
+    _prune_history_storage()
+    return event_id
+
+
+def _event_media_info(row: dict[str, Any]) -> dict[str, Any]:
+    event_id = int(row["id"])
+    event_dir = _event_media_dir(event_id)
+    frame = event_dir / "frame.jpg"
+    crop = event_dir / "crop.jpg"
+    result = dict(row)
+    result.update(
+        {
+            "frame_available": frame.exists(),
+            "crop_available": crop.exists(),
+            "frame_url": f"media/history/{event_id}/frame.jpg" if frame.exists() else "",
+            "crop_url": f"media/history/{event_id}/crop.jpg" if crop.exists() else "",
+        }
+    )
+    return result
+
+
+def _moscow_date_key(value: str) -> str:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(MOSCOW).strftime("%Y-%m-%d")
+    except (TypeError, ValueError):
+        return ""
+
+
 async def recognize_once(trigger_entity: str = "") -> dict[str, Any]:
     global last_gate_open_monotonic, last_result
     if recognition_lock.locked():
@@ -109,6 +178,8 @@ async def recognize_once(trigger_entity: str = "") -> dict[str, Any]:
             "gate_opened": False,
             "error": "",
         }
+        image: bytes = b""
+        crop: tuple[bytes, str] | None = None
         try:
             image, content_type = await HA.camera_image(camera)
             DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -172,10 +243,11 @@ async def recognize_once(trigger_entity: str = "") -> dict[str, Any]:
                     "gate_opened": gate_opened,
                 }
             )
-            add_event(event)
+            event_id = _record_event(event, image=image, crop=crop)
             last_result = {
                 **result,
                 **event,
+                "event_id": event_id,
                 "vehicle": vehicle,
                 "gate_action": gate_action,
                 "result_image_source": crop_source,
@@ -187,8 +259,8 @@ async def recognize_once(trigger_entity: str = "") -> dict[str, Any]:
             raise
         except Exception as error:
             event["error"] = str(error)
-            add_event(event)
-            last_result = {**event, "ok": False}
+            event_id = _record_event(event, image=image or None, crop=crop)
+            last_result = {**event, "event_id": event_id, "ok": False}
             LOGGER.exception("Recognition failed")
             raise HTTPException(status_code=502, detail=str(error)) from error
 
@@ -267,6 +339,7 @@ async def restart_dahua_listener() -> None:
 async def lifespan(_: FastAPI):
     global ha_listener_task
     init_db()
+    _prune_history_storage()
     stop_event.clear()
     ha_listener_task = asyncio.create_task(
         HA.subscribe_state_changes(on_state_changed, stop_event)
@@ -317,6 +390,7 @@ def status() -> dict[str, Any]:
         "version": APP_VERSION,
         "settings": public_settings(load_settings()),
         "last_result": last_result,
+        "history_limit": HISTORY_LIMIT,
         "images": {
             "sent": LAST_SENT_PATH.exists(),
             "result": LAST_RESULT_PATH.exists(),
@@ -387,8 +461,45 @@ def remove_vehicle(vehicle_id: int) -> JSONResponse:
 
 
 @app.get("/api/events")
-def events(limit: int = Query(default=50, ge=1, le=500)) -> list[dict[str, Any]]:
-    return list_events(limit)
+def events(
+    date: str = Query(default="", max_length=10),
+    plate: str = Query(default="", max_length=32),
+    q: str = Query(default="", max_length=120),
+    with_plate: bool = Query(default=False),
+) -> list[dict[str, Any]]:
+    rows = list_events(HISTORY_LIMIT)
+    date_filter = date.strip()
+    plate_filter = normalize_plate(plate)
+    query = q.strip().casefold()
+    normalized_query = normalize_plate(q) if q.strip() else ""
+    filtered: list[dict[str, Any]] = []
+
+    for row in rows:
+        row_plate = normalize_plate(str(row.get("plate") or ""))
+        if date_filter and _moscow_date_key(str(row.get("occurred_at") or "")) != date_filter:
+            continue
+        if plate_filter and plate_filter not in row_plate:
+            continue
+        if with_plate and not row_plate:
+            continue
+        if query:
+            haystack = " ".join(
+                str(row.get(key) or "")
+                for key in (
+                    "plate",
+                    "vehicle_name",
+                    "vehicle_note",
+                    "camera_entity",
+                    "trigger_entity",
+                    "error",
+                )
+            ).casefold()
+            plate_match = bool(normalized_query and normalized_query in row_plate)
+            if query not in haystack and not plate_match:
+                continue
+        filtered.append(_event_media_info(row))
+
+    return filtered
 
 
 @app.get("/media/last_sent.jpg")
@@ -409,3 +520,19 @@ def last_crop() -> FileResponse:
         media_type="image/jpeg",
         headers={"Cache-Control": "no-store"},
     )
+
+
+@app.get("/media/history/{event_id}/frame.jpg")
+def history_frame(event_id: int) -> FileResponse:
+    path = _event_media_dir(event_id) / "frame.jpg"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Кадр события не найден")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/media/history/{event_id}/crop.jpg")
+def history_crop(event_id: int) -> FileResponse:
+    path = _event_media_dir(event_id) / "crop.jpg"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Crop события не найден")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
