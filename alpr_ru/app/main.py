@@ -13,7 +13,13 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .alpr import AlprError, download_result_image, recognize, validate_api_key
+from .alpr import (
+    AlprError,
+    crop_result_from_bbox,
+    download_result_image,
+    recognize,
+    validate_api_key,
+)
 from .config import (
     APP_VERSION,
     DATA_DIR,
@@ -145,9 +151,14 @@ async def recognize_once(trigger_entity: str = "") -> dict[str, Any]:
                     last_gate_open_monotonic = monotonic()
                     gate_opened = True
 
-            crop = await download_result_image(
-                str(settings.get("api_url") or ""), result
-            )
+            api_url = str(settings.get("api_url") or "")
+            api_key = str(settings.get("api_key") or "")
+            crop = await download_result_image(api_url, api_key, result)
+            crop_source = "server_debug" if crop else ""
+            if not crop:
+                crop = crop_result_from_bbox(image, result)
+                if crop:
+                    crop_source = "local_bbox"
             if crop:
                 LAST_RESULT_PATH.write_bytes(crop[0])
 
@@ -167,6 +178,7 @@ async def recognize_once(trigger_entity: str = "") -> dict[str, Any]:
                 **event,
                 "vehicle": vehicle,
                 "gate_action": gate_action,
+                "result_image_source": crop_source,
                 "sent_image_available": LAST_SENT_PATH.exists(),
                 "result_image_available": LAST_RESULT_PATH.exists(),
             }
