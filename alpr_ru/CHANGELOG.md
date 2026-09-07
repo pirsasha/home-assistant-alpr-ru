@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.4
+
+- Принудительно выпущена новая версия App, чтобы Home Assistant скачал свежий Docker-образ с настройками прямого Dahua VideoMotion.
+- Добавлен cache-busting для `app.js` и `app.css`, чтобы Ingress не показывал старый интерфейс после обновления.
+- В настройках доступны режимы: без триггера, Home Assistant `binary_sensor.*`, Dahua VideoMotion напрямую.
+
 ## 0.1.3
 
 - Добавлен прямой локальный триггер `Dahua VideoMotion` через `eventManager.cgi` с Digest authentication.
