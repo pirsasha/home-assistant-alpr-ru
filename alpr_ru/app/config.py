@@ -10,7 +10,7 @@ SETTINGS_PATH = DATA_DIR / "settings.json"
 LAST_SENT_PATH = DATA_DIR / "last_sent.jpg"
 LAST_RESULT_PATH = DATA_DIR / "last_result.jpg"
 DB_PATH = DATA_DIR / "alpr_ru.db"
-APP_VERSION = os.environ.get("ALPR_RU_VERSION", "0.1.3")
+APP_VERSION = os.environ.get("ALPR_RU_VERSION", "0.1.4")
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "api_url": "https://api-alpr.pirogovx.ru",
