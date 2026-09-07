@@ -1,6 +1,7 @@
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 let statusData = null;
+let historyReloadTimer = null;
 
 const api = async (path, opts = {}) => {
   const r = await fetch(path, {
@@ -231,17 +232,79 @@ $('#vehicle-form').onsubmit = async (e) => {
   }
 };
 
+function historyQuery() {
+  const params = new URLSearchParams();
+  const date = $('#history-date').value.trim();
+  const plate = $('#history-plate').value.trim();
+  const search = $('#history-search').value.trim();
+  if (date) params.set('date', date);
+  if (plate) params.set('plate', plate);
+  if (search) params.set('q', search);
+  if ($('#history-with-plate').checked) params.set('with_plate', 'true');
+  const query = params.toString();
+  return query ? `?${query}` : '';
+}
+
+function scheduleHistoryReload() {
+  clearTimeout(historyReloadTimer);
+  historyReloadTimer = setTimeout(loadEvents, 250);
+}
+
+function historyImage(url, available, title, eventId) {
+  if (!available || !url) {
+    return `<div class="history-photo"><div class="history-photo-title">${esc(title)}</div><div class="history-empty">Нет изображения</div></div>`;
+  }
+  const src = `${url}?event=${encodeURIComponent(eventId)}`;
+  return `<div class="history-photo"><div class="history-photo-title">${esc(title)}</div><a href="${esc(src)}" target="_blank" rel="noopener"><img src="${esc(src)}" loading="lazy" alt="${esc(title)}"></a></div>`;
+}
+
 async function loadEvents() {
-  const rows = await api('api/events?limit=100');
-  const box = $('#events-list');
-  box.innerHTML = rows.length ? '' : '<div class="muted">История пока пустая</div>';
-  for (const r of rows) {
-    const d = document.createElement('div');
-    d.className = 'list-item';
-    d.innerHTML = `<div><div class="list-title">${esc(r.plate || 'Номер не найден')}</div><div class="list-meta">${esc(formatMoscow(r.occurred_at))}${r.confidence != null ? ' · ' + (Number(r.confidence) * 100).toFixed(1) + '%' : ''} · ${r.error ? 'Ошибка: ' + esc(r.error) : (r.allowed ? (r.gate_opened ? 'Разрешён · ворота открыты' : 'Разрешён') : 'Отказ')}</div></div>`;
-    box.appendChild(d);
+  try {
+    const rows = await api(`api/events${historyQuery()}`);
+    const box = $('#events-list');
+    $('#history-count').textContent = `${rows.length} / ${statusData?.history_limit || 10}`;
+    box.innerHTML = rows.length ? '' : '<div class="history-empty-list">По этим фильтрам событий нет</div>';
+
+    for (const r of rows) {
+      const d = document.createElement('article');
+      d.className = 'history-event';
+      const confidence = r.confidence == null ? '' : ` · ${(Number(r.confidence) * 100).toFixed(1)}%`;
+      const access = r.error
+        ? `Ошибка: ${esc(r.error)}`
+        : (r.allowed ? (r.gate_opened ? 'Доступ разрешён · ворота открыты' : 'Доступ разрешён') : (r.plate ? 'Доступ запрещён' : 'Номер не найден'));
+      const owner = r.vehicle_name ? ` · ${esc(r.vehicle_name)}` : '';
+      const source = r.trigger_entity ? `<div class="history-source">${esc(r.trigger_entity)}</div>` : '';
+      d.innerHTML = `
+        <div class="history-event-head">
+          <div>
+            <div class="history-plate">${esc(r.plate || 'Номер не найден')}${owner}</div>
+            <div class="history-meta">${esc(formatMoscow(r.occurred_at))}${confidence} · ${access}</div>
+            ${source}
+          </div>
+          <span class="access ${r.allowed ? 'good' : (r.plate ? 'bad' : 'neutral')}">${r.allowed ? 'Разрешён' : (r.plate ? 'Отказ' : 'Без номера')}</span>
+        </div>
+        <div class="history-media">
+          ${historyImage(r.frame_url, r.frame_available, 'Кадр проезда', r.id)}
+          ${historyImage(r.crop_url, r.crop_available, 'Crop номера', r.id)}
+        </div>`;
+      box.appendChild(d);
+    }
+  } catch (err) {
+    toast(err.message);
   }
 }
+
+$('#history-date').onchange = loadEvents;
+$('#history-plate').oninput = scheduleHistoryReload;
+$('#history-search').oninput = scheduleHistoryReload;
+$('#history-with-plate').onchange = loadEvents;
+$('#history-reset').onclick = () => {
+  $('#history-date').value = '';
+  $('#history-plate').value = '';
+  $('#history-search').value = '';
+  $('#history-with-plate').checked = false;
+  loadEvents();
+};
 
 function esc(v) {
   return String(v ?? '').replace(/[&<>"']/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
