@@ -63,13 +63,28 @@
       <form id="settings-form" class="card form-grid">
         <label>ALPR API URL<input id="api-url" type="url" value="https://api-alpr.pirogovx.ru"></label>
         <label>API key<input id="api-key" type="password" placeholder="Оставьте пустым, чтобы не менять сохранённый ключ"></label>
-        <label>Камера<select id="camera-entity"><option value="">Не выбрана</option></select></label>
-        <label>Триггер распознавания<select id="trigger-entity"><option value="">Без автоматического триггера</option></select></label>
+
+        <label>Камера Home Assistant<select id="camera-entity"><option value="">Не выбрана</option></select></label>
+        <label>Режим триггера
+          <select id="trigger-mode">
+            <option value="none">Без автоматического триггера</option>
+            <option value="ha">Home Assistant binary_sensor</option>
+            <option value="dahua">Dahua VideoMotion напрямую</option>
+          </select>
+        </label>
+
+        <label id="ha-trigger-row" class="hidden">Триггер Home Assistant<select id="trigger-entity"><option value="">Не выбран</option></select></label>
+        <label class="dahua-trigger-row hidden">Адрес Dahua<input id="dahua-url" placeholder="192.168.2.120 или http://192.168.2.120"></label>
+        <label class="dahua-trigger-row hidden">Пользователь Dahua<input id="dahua-username" autocomplete="username" value="admin"></label>
+        <label class="dahua-trigger-row hidden">Пароль Dahua<input id="dahua-password" type="password" autocomplete="current-password" placeholder="Оставьте пустым, чтобы не менять"></label>
+        <label class="dahua-trigger-row hidden">Cooldown VideoMotion, сек<input id="dahua-motion-cooldown" type="number" min="0" max="3600" value="10"></label>
+        <div id="dahua-status" class="muted dahua-trigger-row hidden span-2">Dahua trigger не настроен</div>
+
         <label>Тип номера<select id="plate-type"><option value="auto">Автоматически</option><option value="single_line">Однострочный</option><option value="two_line">Двухстрочный</option></select></label>
         <label>Устройство ворот<select id="gate-entity"><option value="">Не открывать автоматически</option></select></label>
         <label>Минимальная уверенность<input id="min-confidence" type="number" min="0" max="1" step="0.01"></label>
         <label>Cooldown ворот, сек<input id="gate-cooldown" type="number" min="0" max="3600"></label>
-        <div class="row"><button type="submit" class="primary">Сохранить</button><span id="settings-state" class="muted"></span></div>
+        <div class="row span-2"><button type="submit" class="primary">Сохранить</button><span id="settings-state" class="muted"></span></div>
       </form>
     </section>
   </main>
