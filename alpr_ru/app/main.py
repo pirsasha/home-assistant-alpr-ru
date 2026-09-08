@@ -55,8 +55,8 @@ recognition_lock = asyncio.Lock()
 stop_event = asyncio.Event()
 ha_listener_task: asyncio.Task[None] | None = None
 dahua_listener_task: asyncio.Task[None] | None = None
-last_gate_open_monotonic = 0.0
-last_dahua_trigger_monotonic = 0.0
+last_gate_open_monotonic: float | None = None
+last_dahua_trigger_monotonic: float | None = None
 last_result: dict[str, Any] = {}
 
 
@@ -176,6 +176,7 @@ async def recognize_once(trigger_entity: str = "") -> dict[str, Any]:
             "valid_format": None,
             "allowed": False,
             "gate_opened": False,
+            "gate_reason": "",
             "error": "",
         }
         image: bytes = b""
@@ -214,13 +215,44 @@ async def recognize_once(trigger_entity: str = "") -> dict[str, Any]:
             )
             gate_opened = False
             gate_action = ""
+            gate_reason = ""
             gate_entity = str(settings.get("gate_entity") or "")
-            if allowed and vehicle and bool(vehicle.get("open_gate")) and gate_entity:
-                cooldown = int(settings.get("gate_cooldown", 30))
-                if monotonic() - last_gate_open_monotonic >= cooldown:
-                    gate_action = await HA.open_gate(gate_entity)
-                    last_gate_open_monotonic = monotonic()
-                    gate_opened = True
+
+            if allowed:
+                if not vehicle:
+                    gate_reason = "vehicle_not_found"
+                elif not bool(vehicle.get("open_gate")):
+                    gate_reason = "vehicle_auto_open_disabled"
+                elif not gate_entity:
+                    gate_reason = "gate_not_configured"
+                else:
+                    cooldown = int(settings.get("gate_cooldown", 30))
+                    now_gate = monotonic()
+                    cooldown_elapsed = (
+                        last_gate_open_monotonic is None
+                        or cooldown <= 0
+                        or now_gate - last_gate_open_monotonic >= cooldown
+                    )
+                    if cooldown_elapsed:
+                        gate_action = await HA.open_gate(gate_entity)
+                        last_gate_open_monotonic = monotonic()
+                        gate_opened = True
+                        gate_reason = "opened"
+                    else:
+                        remaining = max(
+                            0,
+                            int(
+                                cooldown
+                                - (now_gate - last_gate_open_monotonic)
+                                + 0.999
+                            ),
+                        )
+                        gate_reason = f"cooldown:{remaining}"
+                        LOGGER.info(
+                            "Gate opening skipped for %s: cooldown, %ss remaining",
+                            plate,
+                            remaining,
+                        )
 
             api_url = str(settings.get("api_url") or "")
             api_key = str(settings.get("api_key") or "")
@@ -241,6 +273,7 @@ async def recognize_once(trigger_entity: str = "") -> dict[str, Any]:
                     "valid_format": result.get("valid_format"),
                     "allowed": allowed,
                     "gate_opened": gate_opened,
+                    "gate_reason": gate_reason,
                 }
             )
             event_id = _record_event(event, image=image, crop=crop)
@@ -288,7 +321,10 @@ async def on_dahua_motion_start(_raw_event: str) -> None:
         return
     cooldown = int(settings.get("dahua_motion_cooldown", 10))
     now = monotonic()
-    if now - last_dahua_trigger_monotonic < cooldown:
+    if (
+        last_dahua_trigger_monotonic is not None
+        and now - last_dahua_trigger_monotonic < cooldown
+    ):
         return
     last_dahua_trigger_monotonic = now
     try:
