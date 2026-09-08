@@ -12,7 +12,7 @@ LAST_RESULT_PATH = DATA_DIR / "last_result.jpg"
 HISTORY_DIR = DATA_DIR / "history"
 HISTORY_LIMIT = 10
 DB_PATH = DATA_DIR / "alpr_ru.db"
-APP_VERSION = os.environ.get("ALPR_RU_VERSION", "0.1.9")
+APP_VERSION = os.environ.get("ALPR_RU_VERSION", "0.1.10")
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "api_url": "https://api-alpr.pirogovx.ru",
